@@ -1,22 +1,18 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/context/AuthContext";
 import Navbar from "@/components/Navbar";
 
-const geistSans = Geist({
+const inter = Inter({
   variable: "--font-geist-sans",
   subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+  weight: ["300", "400", "500", "600", "700", "800"],
 });
 
 export const metadata: Metadata = {
-  title: "HostelManager - Management System",
-  description: "Efficiently manage your hostel rooms, students, and complaints",
+  title: "HostelManager — Smart Hostel Management",
+  description: "A premium hostel & PG management system. Manage rooms, students, payments, and complaints effortlessly.",
 };
 
 export default function RootLayout({
@@ -25,11 +21,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased bg-gray-50`}>
+    <html lang="en" className="dark">
+      <body className={`${inter.variable} antialiased`}>
         <AuthProvider>
           <Navbar />
-          <main className="pt-20">
+          <main className="relative z-10 w-full min-h-screen">
             {children}
           </main>
         </AuthProvider>

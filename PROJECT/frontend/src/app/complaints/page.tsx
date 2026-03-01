@@ -17,275 +17,151 @@ export default function ComplaintsPage() {
   const [newComplaint, setNewComplaint] = useState({ category: 'Maintenance', description: '' });
   const [adminResponse, setAdminResponse] = useState('');
   const [studentId, setStudentId] = useState<string | null>(null);
-
   const isAdmin = profile?.role === 'ADMIN';
 
   const fetchStudentId = async () => {
     if (!user || isAdmin) return;
-    const { data } = await supabase
-      .from('students')
-      .select('id')
-      .eq('user_id', user.id)
-      .single();
+    const { data } = await supabase.from('students').select('id').eq('user_id', user.id).single();
     if (data) setStudentId(data.id);
   };
 
   const fetchComplaints = async () => {
     try {
-      let query = supabase
-        .from('complaints')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (!isAdmin && studentId) {
-        query = query.eq('student_id', studentId);
-      }
-
+      let query = supabase.from('complaints').select('*').order('created_at', { ascending: false });
+      if (!isAdmin && studentId) query = query.eq('student_id', studentId);
       const { data, error } = await query;
       if (error) throw error;
       setComplaints(data || []);
-    } catch (err) {
-      setError('Failed to fetch complaints');
-    } finally {
-      setLoading(false);
-    }
+    } catch { setError('Failed to fetch complaints'); } finally { setLoading(false); }
   };
 
-  useEffect(() => {
-    fetchStudentId();
-  }, [user, isAdmin]);
-
+  useEffect(() => { fetchStudentId(); }, [user, isAdmin]);
   useEffect(() => {
     if (isAdmin || studentId) {
       fetchComplaints();
-
-      const channel = supabase
-        .channel('complaints-realtime')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'complaints' }, () => {
-          fetchComplaints();
-        })
-        .subscribe();
-
-      return () => {
-        supabase.removeChannel(channel);
-      };
+      const ch = supabase.channel('complaints-rt').on('postgres_changes', { event: '*', schema: 'public', table: 'complaints' }, () => fetchComplaints()).subscribe();
+      return () => { supabase.removeChannel(ch); };
     }
   }, [isAdmin, studentId]);
 
   const handleAddComplaint = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!studentId) {
-      setError('Student profile not found. Please contact admin.');
-      return;
-    }
+    if (!studentId) { setError('Student profile not found.'); return; }
     setSubmitting(true);
     try {
-      const { error } = await supabase.from('complaints').insert({
-        student_id: studentId,
-        category: newComplaint.category,
-        description: newComplaint.description,
-        status: 'OPEN',
-      });
+      const { error } = await supabase.from('complaints').insert({ student_id: studentId, category: newComplaint.category, description: newComplaint.description, status: 'OPEN' });
       if (error) throw error;
-      setShowAddModal(false);
-      setNewComplaint({ category: 'Maintenance', description: '' });
-    } catch (err: any) {
-      setError(err.message || 'Failed to submit complaint');
-    } finally {
-      setSubmitting(false);
-    }
+      setShowAddModal(false); setNewComplaint({ category: 'Maintenance', description: '' });
+    } catch (err: any) { setError(err.message || 'Failed to submit'); } finally { setSubmitting(false); }
   };
 
   const updateComplaintStatus = async (id: string, status: string) => {
     try {
-      const { error } = await supabase
-        .from('complaints')
-        .update({ status, updated_at: new Date().toISOString() })
-        .eq('id', id);
-      if (error) throw error;
-      setShowDetailModal(null);
-    } catch (err: any) {
-      setError(err.message || 'Failed to update status');
-    }
+      const { error } = await supabase.from('complaints').update({ status, updated_at: new Date().toISOString() }).eq('id', id);
+      if (error) throw error; setShowDetailModal(null);
+    } catch (err: any) { setError(err.message || 'Failed to update'); }
   };
 
   const submitAdminResponse = async (id: string) => {
     if (!adminResponse.trim()) return;
     try {
-      const { error } = await supabase
-        .from('complaints')
-        .update({ 
-          admin_response: adminResponse, 
-          status: 'IN_PROGRESS',
-          updated_at: new Date().toISOString() 
-        })
-        .eq('id', id);
-      if (error) throw error;
-      setAdminResponse('');
-      setShowDetailModal(null);
-    } catch (err: any) {
-      setError(err.message || 'Failed to submit response');
-    }
+      const { error } = await supabase.from('complaints').update({ admin_response: adminResponse, status: 'IN_PROGRESS', updated_at: new Date().toISOString() }).eq('id', id);
+      if (error) throw error; setAdminResponse(''); setShowDetailModal(null);
+    } catch (err: any) { setError(err.message || 'Failed to respond'); }
   };
 
   const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'RESOLVED': return <CheckCircle className="h-5 w-5 text-green-500" />;
-      case 'IN_PROGRESS': return <Clock className="h-5 w-5 text-yellow-500" />;
-      default: return <HelpCircle className="h-5 w-5 text-blue-500" />;
-    }
+    if (status === 'RESOLVED') return <CheckCircle className="h-5 w-5 text-emerald-400" />;
+    if (status === 'IN_PROGRESS') return <Clock className="h-5 w-5 text-amber-400" />;
+    return <HelpCircle className="h-5 w-5 text-blue-400" />;
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'RESOLVED': return 'bg-green-100 text-green-800 border-green-200';
-      case 'IN_PROGRESS': return 'bg-yellow-100 text-yellow-800 border-yellow-200';
-      default: return 'bg-blue-100 text-blue-800 border-blue-200';
-    }
-  };
-
+  const getStatusBadge = (s: string) => s === 'RESOLVED' ? 'badge-green' : s === 'IN_PROGRESS' ? 'badge-yellow' : 'badge-blue';
   const categories = ['Maintenance', 'Cleanliness', 'Food', 'Internet', 'Security', 'Noise', 'Plumbing', 'Electrical', 'Others'];
 
   return (
     <ProtectedRoute>
-      <div className="min-h-screen bg-gray-50 pt-16">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="flex justify-between items-center mb-6">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">Complaints</h1>
-              <p className="text-gray-600 mt-1">
-                {isAdmin ? 'Manage and respond to complaints' : 'Submit and track your complaints'}
-              </p>
+      <div className="min-h-screen pb-12">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8">
+          <div className="flex justify-between items-center mb-8 animate-fade-in-up">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(168, 85, 247, 0.15))', border: '1px solid rgba(139, 92, 246, 0.3)' }}>
+                <MessageSquare className="h-5 w-5 text-purple-400" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold text-slate-100">Complaints</h1>
+                <p className="text-slate-400 text-sm">{isAdmin ? 'Manage and respond to complaints' : 'Submit and track your complaints'}</p>
+              </div>
             </div>
             {!isAdmin && (
-              <button
-                onClick={() => setShowAddModal(true)}
-                className="inline-flex items-center px-4 py-2 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 transition-colors"
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                New Complaint
-              </button>
+              <button onClick={() => setShowAddModal(true)} className="btn-gradient flex items-center gap-2"><Plus className="h-4 w-4" /> New Complaint</button>
             )}
           </div>
 
           {error && (
-            <div className="mb-4 bg-red-50 border-l-4 border-red-400 p-4 flex items-center rounded-r-lg">
-              <AlertCircle className="h-5 w-5 text-red-400 mr-2" />
-              <p className="text-sm text-red-700">{error}</p>
-              <button onClick={() => setError('')} className="ml-auto">
-                <X className="h-4 w-4 text-red-400" />
-              </button>
+            <div className="mb-6 p-4 rounded-xl flex items-center gap-3 animate-slide-down" style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
+              <AlertCircle className="h-5 w-5 text-rose-400 shrink-0" /><p className="text-sm text-rose-300 flex-1">{error}</p>
+              <button onClick={() => setError('')}><X className="h-4 w-4 text-rose-400" /></button>
             </div>
           )}
 
           {loading ? (
-            <div className="flex justify-center py-12">
-              <Loader2 className="h-8 w-8 text-blue-500 animate-spin" />
-            </div>
+            <div className="flex flex-col items-center py-24"><Loader2 className="h-10 w-10 text-indigo-400 animate-spin" /><p className="mt-4 text-slate-400 text-sm">Loading...</p></div>
           ) : complaints.length === 0 ? (
-            <div className="text-center py-12 bg-white rounded-xl border-2 border-dashed border-gray-300">
-              <MessageSquare className="mx-auto h-12 w-12 text-gray-400" />
-              <h3 className="mt-2 text-sm font-medium text-gray-900">No complaints</h3>
-              <p className="mt-1 text-sm text-gray-500">
-                {isAdmin ? 'No complaints have been submitted yet.' : 'You haven\'t submitted any complaints yet.'}
-              </p>
-              {!isAdmin && (
-                <button
-                  onClick={() => setShowAddModal(true)}
-                  className="mt-4 inline-flex items-center px-4 py-2 text-sm font-medium text-blue-600 bg-blue-50 rounded-lg hover:bg-blue-100"
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Submit Complaint
-                </button>
-              )}
+            <div className="glass-card text-center py-16 animate-fade-in-up">
+              <MessageSquare className="mx-auto h-14 w-14 text-slate-600 mb-3" />
+              <h3 className="text-lg font-semibold text-slate-300">No complaints</h3>
+              <p className="text-slate-500 text-sm mt-1">{isAdmin ? 'No complaints submitted yet.' : 'You haven\'t submitted any complaints.'}</p>
             </div>
           ) : (
-            <div className="bg-white shadow-sm rounded-xl border border-gray-200 overflow-hidden">
-              <ul className="divide-y divide-gray-200">
-                {complaints.map((complaint) => (
-                  <li
-                    key={complaint.id}
-                    onClick={() => setShowDetailModal(complaint)}
-                    className="px-6 py-4 hover:bg-gray-50 transition-colors cursor-pointer"
-                  >
+            <div className="glass-card overflow-hidden animate-fade-in-up">
+              <div className="divide-y divide-white/[0.04]">
+                {complaints.map((c, i) => (
+                  <div key={c.id} onClick={() => setShowDetailModal(c)}
+                    className="px-6 py-5 hover:bg-white/[0.03] transition-all duration-300 cursor-pointer animate-fade-in-up opacity-0"
+                    style={{ animationDelay: `${i * 0.05}s`, animationFillMode: 'forwards' }}>
                     <div className="flex items-center justify-between">
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center space-x-3">
-                          <span className="px-2 py-1 text-xs font-medium bg-gray-100 text-gray-700 rounded-full">
-                            {complaint.category}
-                          </span>
-                          <span className={`px-2 py-1 text-xs font-medium rounded-full border ${getStatusColor(complaint.status)}`}>
-                            {complaint.status}
-                          </span>
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="badge badge-purple">{c.category}</span>
+                          <span className={`badge ${getStatusBadge(c.status)}`}>{c.status}</span>
                         </div>
-                        <p className="mt-2 text-sm text-gray-900 line-clamp-2">{complaint.description}</p>
-                        <p className="mt-1 text-xs text-gray-500">
-                          {new Date(complaint.created_at).toLocaleDateString('en-US', {
-                            month: 'short',
-                            day: 'numeric',
-                            year: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
+                        <p className="text-sm text-slate-200 line-clamp-2">{c.description}</p>
+                        <p className="text-xs text-slate-500 mt-2">
+                          {new Date(c.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                         </p>
                       </div>
-                      <div className="ml-4">
-                        {getStatusIcon(complaint.status)}
-                      </div>
+                      <div className="ml-4">{getStatusIcon(c.status)}</div>
                     </div>
-                  </li>
+                  </div>
                 ))}
-              </ul>
+              </div>
             </div>
           )}
 
+          {/* Add Complaint Modal */}
           {showAddModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-              <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
-                <div className="flex justify-between items-center mb-4">
-                  <h2 className="text-xl font-bold text-gray-900">Submit Complaint</h2>
-                  <button onClick={() => setShowAddModal(false)} className="text-gray-400 hover:text-gray-600">
-                    <X className="h-5 w-5" />
-                  </button>
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 modal-overlay animate-backdrop">
+              <div className="glass-card max-w-md w-[95%] sm:w-full p-6 animate-modal" style={{ background: 'rgba(15, 23, 42, 0.95)' }}>
+                <div className="flex justify-between items-center mb-5">
+                  <h2 className="text-xl font-bold text-slate-100">Submit Complaint</h2>
+                  <button onClick={() => setShowAddModal(false)} className="text-slate-400 hover:text-white"><X className="h-5 w-5" /></button>
                 </div>
                 <form onSubmit={handleAddComplaint} className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
-                    <select
-                      className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
-                      value={newComplaint.category}
-                      onChange={(e) => setNewComplaint({ ...newComplaint, category: e.target.value })}
-                    >
-                      {categories.map(cat => (
-                        <option key={cat} value={cat}>{cat}</option>
-                      ))}
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Category</label>
+                    <select className="input-dark" value={newComplaint.category} onChange={(e) => setNewComplaint({ ...newComplaint, category: e.target.value })}>
+                      {categories.map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-                    <textarea
-                      className="w-full border border-gray-300 rounded-lg px-4 py-2 h-32 focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-                      placeholder="Describe your issue in detail..."
-                      required
-                      value={newComplaint.description}
-                      onChange={(e) => setNewComplaint({ ...newComplaint, description: e.target.value })}
-                    />
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Description</label>
+                    <textarea className="input-dark h-32 resize-none" placeholder="Describe your issue..." required value={newComplaint.description} onChange={(e) => setNewComplaint({ ...newComplaint, description: e.target.value })} />
                   </div>
-                  <div className="flex justify-end space-x-3 pt-4">
-                    <button
-                      type="button"
-                      onClick={() => setShowAddModal(false)}
-                      className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={submitting}
-                      className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center"
-                    >
-                      {submitting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                      Submit
+                  <div className="flex justify-end gap-3 pt-3">
+                    <button type="button" onClick={() => setShowAddModal(false)} className="px-4 py-2.5 text-sm font-medium text-slate-400 rounded-xl hover:bg-white/5">Cancel</button>
+                    <button type="submit" disabled={submitting} className="btn-gradient flex items-center gap-2 disabled:opacity-50">
+                      {submitting && <Loader2 className="h-4 w-4 animate-spin" />} Submit
                     </button>
                   </div>
                 </form>
@@ -293,81 +169,48 @@ export default function ComplaintsPage() {
             </div>
           )}
 
+          {/* Detail Modal */}
           {showDetailModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-              <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
-                <div className="flex justify-between items-start mb-4">
-                  <div>
-                    <span className="px-2 py-1 text-xs font-medium bg-gray-100 text-gray-700 rounded-full">
-                      {showDetailModal.category}
-                    </span>
-                    <span className={`ml-2 px-2 py-1 text-xs font-medium rounded-full border ${getStatusColor(showDetailModal.status)}`}>
-                      {showDetailModal.status}
-                    </span>
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 modal-overlay animate-backdrop">
+              <div className="glass-card max-w-lg w-[95%] sm:w-full p-6 max-h-[90vh] overflow-y-auto animate-modal" style={{ background: 'rgba(15, 23, 42, 0.95)' }}>
+                <div className="flex justify-between items-start mb-5">
+                  <div className="flex items-center gap-2">
+                    <span className="badge badge-purple">{showDetailModal.category}</span>
+                    <span className={`badge ${getStatusBadge(showDetailModal.status)}`}>{showDetailModal.status}</span>
                   </div>
-                  <button onClick={() => setShowDetailModal(null)} className="text-gray-400 hover:text-gray-600">
-                    <X className="h-5 w-5" />
-                  </button>
+                  <button onClick={() => setShowDetailModal(null)} className="text-slate-400 hover:text-white"><X className="h-5 w-5" /></button>
                 </div>
-
-                <div className="space-y-4">
+                <div className="space-y-5">
                   <div>
-                    <h3 className="text-sm font-medium text-gray-500">Description</h3>
-                    <p className="mt-1 text-gray-900">{showDetailModal.description}</p>
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Description</p>
+                    <p className="text-slate-200 text-sm">{showDetailModal.description}</p>
                   </div>
-
                   <div>
-                    <h3 className="text-sm font-medium text-gray-500">Submitted</h3>
-                    <p className="mt-1 text-gray-900">
-                      {new Date(showDetailModal.created_at).toLocaleString()}
-                    </p>
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Submitted</p>
+                    <p className="text-slate-300 text-sm">{new Date(showDetailModal.created_at).toLocaleString()}</p>
                   </div>
-
                   {showDetailModal.admin_response && (
-                    <div className="bg-blue-50 rounded-lg p-4">
-                      <h3 className="text-sm font-medium text-blue-800">Admin Response</h3>
-                      <p className="mt-1 text-blue-700">{showDetailModal.admin_response}</p>
+                    <div className="p-4 rounded-xl" style={{ background: 'rgba(99, 102, 241, 0.1)', border: '1px solid rgba(99, 102, 241, 0.2)' }}>
+                      <p className="text-xs font-semibold text-indigo-400 uppercase tracking-wider mb-1">Admin Response</p>
+                      <p className="text-indigo-200 text-sm">{showDetailModal.admin_response}</p>
                     </div>
                   )}
-
                   {isAdmin && (
-                    <div className="pt-4 border-t border-gray-200">
-                      <h3 className="text-sm font-medium text-gray-700 mb-2">Admin Actions</h3>
-                      <div className="space-y-3">
-                        <div className="flex space-x-2">
-                          {showDetailModal.status !== 'IN_PROGRESS' && (
-                            <button
-                              onClick={() => updateComplaintStatus(showDetailModal.id, 'IN_PROGRESS')}
-                              className="px-3 py-1.5 text-xs font-medium text-yellow-700 bg-yellow-100 rounded-lg hover:bg-yellow-200"
-                            >
-                              Mark In Progress
-                            </button>
-                          )}
-                          {showDetailModal.status !== 'RESOLVED' && (
-                            <button
-                              onClick={() => updateComplaintStatus(showDetailModal.id, 'RESOLVED')}
-                              className="px-3 py-1.5 text-xs font-medium text-green-700 bg-green-100 rounded-lg hover:bg-green-200"
-                            >
-                              Mark Resolved
-                            </button>
-                          )}
-                        </div>
-                        <div className="flex space-x-2">
-                          <input
-                            type="text"
-                            placeholder="Add a response..."
-                            className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            value={adminResponse}
-                            onChange={(e) => setAdminResponse(e.target.value)}
-                          />
-                          <button
-                            onClick={() => submitAdminResponse(showDetailModal.id)}
-                            disabled={!adminResponse.trim()}
-                            className="px-3 py-2 text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                          >
-                            <Send className="h-4 w-4" />
-                          </button>
-                        </div>
+                    <div className="pt-4" style={{ borderTop: '1px solid rgba(148, 163, 184, 0.08)' }}>
+                      <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Admin Actions</p>
+                      <div className="flex flex-wrap gap-2 mb-3">
+                        {showDetailModal.status !== 'IN_PROGRESS' && (
+                          <button onClick={() => updateComplaintStatus(showDetailModal.id, 'IN_PROGRESS')} className="badge badge-yellow cursor-pointer hover:opacity-80 transition-opacity">Mark In Progress</button>
+                        )}
+                        {showDetailModal.status !== 'RESOLVED' && (
+                          <button onClick={() => updateComplaintStatus(showDetailModal.id, 'RESOLVED')} className="badge badge-green cursor-pointer hover:opacity-80 transition-opacity">Mark Resolved</button>
+                        )}
+                      </div>
+                      <div className="flex gap-2">
+                        <input type="text" placeholder="Add a response..." className="input-dark flex-1" value={adminResponse} onChange={(e) => setAdminResponse(e.target.value)} />
+                        <button onClick={() => submitAdminResponse(showDetailModal.id)} disabled={!adminResponse.trim()} className="btn-gradient px-3 disabled:opacity-50">
+                          <Send className="h-4 w-4" />
+                        </button>
                       </div>
                     </div>
                   )}

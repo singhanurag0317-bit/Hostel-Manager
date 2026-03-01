@@ -1,9 +1,22 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.error(
+    '\n⚠️  Missing Supabase credentials!\n' +
+    '   Please create PROJECT/frontend/.env.local with:\n' +
+    '   NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co\n' +
+    '   NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key\n' +
+    '   Get these from: https://supabase.com/dashboard → Settings → API\n'
+  );
+}
+
+export const supabase: SupabaseClient = createClient(
+  supabaseUrl || 'https://placeholder.supabase.co',
+  supabaseAnonKey || 'placeholder-key'
+);
 
 export type Profile = {
   id: string;

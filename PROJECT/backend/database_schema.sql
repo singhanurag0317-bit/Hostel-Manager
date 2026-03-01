@@ -1,72 +1,154 @@
--- Database Foundation: Hostel/PG Management System
--- Step 1: Create Database and Tables
+-- Database Schema: Hostel/PG Management System
+-- Compatible with Supabase (PostgreSQL)
+-- Run this in Supabase SQL Editor: https://supabase.com/dashboard → SQL Editor
 
--- 1. Create Database
-CREATE DATABASE IF NOT EXISTS hostel_pg_db;
-USE hostel_pg_db;
-
--- 2. Create Tables
-
--- Table 1: users (Login system)
-CREATE TABLE IF NOT EXISTS users (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
-    email VARCHAR(100) UNIQUE NOT NULL,
-    password VARCHAR(255) NOT NULL,
-    role ENUM('ADMIN', 'STUDENT') NOT NULL
+-- 1. Profiles table (extends Supabase Auth users)
+CREATE TABLE IF NOT EXISTS profiles (
+    id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    email TEXT UNIQUE NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('ADMIN', 'STUDENT')),
+    phone TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Table 2: rooms (Hostel rooms)
+-- 2. Rooms table
 CREATE TABLE IF NOT EXISTS rooms (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    room_number VARCHAR(20) UNIQUE NOT NULL
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    room_number TEXT UNIQUE NOT NULL,
+    floor INTEGER NOT NULL DEFAULT 1,
+    capacity INTEGER NOT NULL DEFAULT 4,
+    rent_amount NUMERIC(10, 2) NOT NULL DEFAULT 5000,
+    created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Table 3: beds (Beds inside rooms)
+-- 3. Beds table
 CREATE TABLE IF NOT EXISTS beds (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    bed_number VARCHAR(20) NOT NULL,
-    room_id INT NOT NULL,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    bed_number TEXT NOT NULL,
+    room_id UUID NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
     is_occupied BOOLEAN DEFAULT FALSE,
-    FOREIGN KEY (room_id) REFERENCES rooms(id)
+    created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Table 4: students (Student details + room info)
+-- 4. Students table
 CREATE TABLE IF NOT EXISTS students (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    user_id INT UNIQUE NOT NULL,
-    bed_id INT UNIQUE, -- Can be NULL if not yet assigned
-    join_date DATE NOT NULL,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID UNIQUE NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    bed_id UUID UNIQUE REFERENCES beds(id) ON DELETE SET NULL,
+    phone TEXT,
+    emergency_contact TEXT,
+    address TEXT,
+    join_date DATE NOT NULL DEFAULT CURRENT_DATE,
     active BOOLEAN DEFAULT TRUE,
-    FOREIGN KEY (user_id) REFERENCES users(id),
-    FOREIGN KEY (bed_id) REFERENCES beds(id)
+    created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Table 5: rent (Monthly rent tracking)
+-- 5. Rent table
 CREATE TABLE IF NOT EXISTS rent (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    student_id INT NOT NULL,
-    month VARCHAR(7) NOT NULL, -- Format: YYYY-MM
-    amount DECIMAL(10, 2) NOT NULL,
-    status ENUM('PAID', 'PENDING') DEFAULT 'PENDING',
-    FOREIGN KEY (student_id) REFERENCES students(id)
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+    month TEXT NOT NULL,  -- Format: YYYY-MM
+    amount NUMERIC(10, 2) NOT NULL,
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PAID', 'PENDING', 'OVERDUE')),
+    paid_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Table 6: complaints (Problem tracking)
+-- 6. Complaints table
 CREATE TABLE IF NOT EXISTS complaints (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    student_id INT NOT NULL,
-    category VARCHAR(50) NOT NULL,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+    category TEXT NOT NULL,
     description TEXT NOT NULL,
-    status ENUM('OPEN', 'IN_PROGRESS', 'RESOLVED') DEFAULT 'OPEN',
-    created_date DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (student_id) REFERENCES students(id)
+    status TEXT NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN', 'IN_PROGRESS', 'RESOLVED')),
+    admin_response TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Table 7: notices (Announcements)
+-- 7. Notices table
 CREATE TABLE IF NOT EXISTS notices (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    title VARCHAR(100) NOT NULL,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title TEXT NOT NULL,
     message TEXT NOT NULL,
-    created_date DATETIME DEFAULT CURRENT_TIMESTAMP
+    priority TEXT NOT NULL DEFAULT 'NORMAL' CHECK (priority IN ('LOW', 'NORMAL', 'HIGH', 'URGENT')),
+    created_by UUID REFERENCES auth.users(id),
+    expires_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- ============================================
+-- Row Level Security (RLS) Policies
+-- ============================================
+
+-- Enable RLS on all tables
+ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE rooms ENABLE ROW LEVEL SECURITY;
+ALTER TABLE beds ENABLE ROW LEVEL SECURITY;
+ALTER TABLE students ENABLE ROW LEVEL SECURITY;
+ALTER TABLE rent ENABLE ROW LEVEL SECURITY;
+ALTER TABLE complaints ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notices ENABLE ROW LEVEL SECURITY;
+
+-- Profiles: users can read all profiles, insert/update their own
+CREATE POLICY "Anyone can view profiles" ON profiles FOR SELECT USING (true);
+CREATE POLICY "Users can insert own profile" ON profiles FOR INSERT WITH CHECK (auth.uid() = id);
+CREATE POLICY "Users can update own profile" ON profiles FOR UPDATE USING (auth.uid() = id);
+
+-- Rooms: everyone can read, admins can insert/update/delete
+CREATE POLICY "Anyone can view rooms" ON rooms FOR SELECT USING (true);
+CREATE POLICY "Admins can manage rooms" ON rooms FOR ALL USING (
+    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'ADMIN')
+);
+
+-- Beds: everyone can read, admins can manage
+CREATE POLICY "Anyone can view beds" ON beds FOR SELECT USING (true);
+CREATE POLICY "Admins can manage beds" ON beds FOR ALL USING (
+    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'ADMIN')
+);
+
+-- Students: admins can see all, students can see their own
+CREATE POLICY "Admins can view all students" ON students FOR SELECT USING (
+    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'ADMIN')
+);
+CREATE POLICY "Students can view own record" ON students FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Anyone can insert student record" ON students FOR INSERT WITH CHECK (true);
+CREATE POLICY "Admins can update students" ON students FOR UPDATE USING (
+    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'ADMIN')
+);
+
+-- Rent: admins can manage all, students can view their own
+CREATE POLICY "Admins can manage rent" ON rent FOR ALL USING (
+    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'ADMIN')
+);
+CREATE POLICY "Students can view own rent" ON rent FOR SELECT USING (
+    EXISTS (SELECT 1 FROM students WHERE id = rent.student_id AND user_id = auth.uid())
+);
+
+-- Complaints: admins can manage all, students can manage their own
+CREATE POLICY "Admins can manage complaints" ON complaints FOR ALL USING (
+    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'ADMIN')
+);
+CREATE POLICY "Students can view own complaints" ON complaints FOR SELECT USING (
+    EXISTS (SELECT 1 FROM students WHERE id = complaints.student_id AND user_id = auth.uid())
+);
+CREATE POLICY "Students can insert complaints" ON complaints FOR INSERT WITH CHECK (
+    EXISTS (SELECT 1 FROM students WHERE id = complaints.student_id AND user_id = auth.uid())
+);
+
+-- Notices: everyone can read, admins can manage
+CREATE POLICY "Anyone can view notices" ON notices FOR SELECT USING (true);
+CREATE POLICY "Admins can manage notices" ON notices FOR ALL USING (
+    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'ADMIN')
+);
+
+-- ============================================
+-- Enable Realtime for all tables
+-- ============================================
+ALTER PUBLICATION supabase_realtime ADD TABLE rooms;
+ALTER PUBLICATION supabase_realtime ADD TABLE beds;
+ALTER PUBLICATION supabase_realtime ADD TABLE students;
+ALTER PUBLICATION supabase_realtime ADD TABLE rent;
+ALTER PUBLICATION supabase_realtime ADD TABLE complaints;
+ALTER PUBLICATION supabase_realtime ADD TABLE notices;

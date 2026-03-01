@@ -13,224 +13,118 @@ export default function NoticesPage() {
   const [error, setError] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [newNotice, setNewNotice] = useState({ 
-    title: '', 
-    message: '', 
-    priority: 'NORMAL' as const,
-    expiresAt: ''
-  });
-
+  const [newNotice, setNewNotice] = useState({ title: '', message: '', priority: 'NORMAL' as const, expiresAt: '' });
   const isAdmin = profile?.role === 'ADMIN';
 
   const fetchNotices = async () => {
     try {
-      const { data, error } = await supabase
-        .from('notices')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setNotices(data || []);
-    } catch (err) {
-      setError('Failed to fetch notices');
-    } finally {
-      setLoading(false);
-    }
+      const { data, error } = await supabase.from('notices').select('*').order('created_at', { ascending: false });
+      if (error) throw error; setNotices(data || []);
+    } catch { setError('Failed to fetch notices'); } finally { setLoading(false); }
   };
 
   useEffect(() => {
     fetchNotices();
-
-    const channel = supabase
-      .channel('notices-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'notices' }, () => {
-        fetchNotices();
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    const ch = supabase.channel('notices-rt').on('postgres_changes', { event: '*', schema: 'public', table: 'notices' }, () => fetchNotices()).subscribe();
+    return () => { supabase.removeChannel(ch); };
   }, []);
 
   const handleAddNotice = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSubmitting(true);
+    e.preventDefault(); setSubmitting(true);
     try {
-      const { error } = await supabase.from('notices').insert({
-        title: newNotice.title,
-        message: newNotice.message,
-        priority: newNotice.priority,
-        created_by: user?.id,
-        expires_at: newNotice.expiresAt || null,
-      });
+      const { error } = await supabase.from('notices').insert({ title: newNotice.title, message: newNotice.message, priority: newNotice.priority, created_by: user?.id, expires_at: newNotice.expiresAt || null });
       if (error) throw error;
-      setShowAddModal(false);
-      setNewNotice({ title: '', message: '', priority: 'NORMAL', expiresAt: '' });
-    } catch (err: any) {
-      setError(err.message || 'Failed to post notice');
-    } finally {
-      setSubmitting(false);
-    }
+      setShowAddModal(false); setNewNotice({ title: '', message: '', priority: 'NORMAL', expiresAt: '' });
+    } catch (err: any) { setError(err.message || 'Failed to post'); } finally { setSubmitting(false); }
   };
 
   const handleDeleteNotice = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this notice?')) return;
-    try {
-      const { error } = await supabase.from('notices').delete().eq('id', id);
-      if (error) throw error;
-    } catch (err: any) {
-      setError(err.message || 'Failed to delete notice');
-    }
+    if (!confirm('Delete this notice?')) return;
+    try { const { error } = await supabase.from('notices').delete().eq('id', id); if (error) throw error; }
+    catch (err: any) { setError(err.message || 'Failed to delete'); }
   };
 
-  const getPriorityIcon = (priority: string) => {
-    switch (priority) {
-      case 'URGENT': return <AlertTriangle className="h-5 w-5 text-red-500" />;
-      case 'HIGH': return <AlertCircle className="h-5 w-5 text-orange-500" />;
-      case 'NORMAL': return <Info className="h-5 w-5 text-blue-500" />;
-      default: return <Clock className="h-5 w-5 text-gray-500" />;
-    }
+  const getPriorityIcon = (p: string) => {
+    if (p === 'URGENT') return <AlertTriangle className="h-5 w-5 text-rose-400" />;
+    if (p === 'HIGH') return <AlertCircle className="h-5 w-5 text-amber-400" />;
+    if (p === 'NORMAL') return <Info className="h-5 w-5 text-blue-400" />;
+    return <Clock className="h-5 w-5 text-slate-400" />;
   };
 
-  const getPriorityColor = (priority: string) => {
-    switch (priority) {
-      case 'URGENT': return 'bg-red-50 border-red-200';
-      case 'HIGH': return 'bg-orange-50 border-orange-200';
-      case 'NORMAL': return 'bg-blue-50 border-blue-200';
-      default: return 'bg-gray-50 border-gray-200';
-    }
+  const getPriorityCard = (p: string) => {
+    if (p === 'URGENT') return { bg: 'rgba(239, 68, 68, 0.06)', border: 'rgba(239, 68, 68, 0.15)' };
+    if (p === 'HIGH') return { bg: 'rgba(245, 158, 11, 0.06)', border: 'rgba(245, 158, 11, 0.15)' };
+    if (p === 'NORMAL') return { bg: 'rgba(59, 130, 246, 0.06)', border: 'rgba(59, 130, 246, 0.12)' };
+    return { bg: 'rgba(148, 163, 184, 0.05)', border: 'rgba(148, 163, 184, 0.1)' };
   };
 
-  const getPriorityBadgeColor = (priority: string) => {
-    switch (priority) {
-      case 'URGENT': return 'bg-red-100 text-red-800 border-red-200';
-      case 'HIGH': return 'bg-orange-100 text-orange-800 border-orange-200';
-      case 'NORMAL': return 'bg-blue-100 text-blue-800 border-blue-200';
-      default: return 'bg-gray-100 text-gray-800 border-gray-200';
-    }
-  };
-
-  const isExpired = (expiresAt: string | undefined) => {
-    if (!expiresAt) return false;
-    return new Date(expiresAt) < new Date();
-  };
+  const getPriorityBadge = (p: string) => p === 'URGENT' ? 'badge-red' : p === 'HIGH' ? 'badge-orange' : p === 'NORMAL' ? 'badge-blue' : 'badge-gray';
+  const isExpired = (e?: string) => e ? new Date(e) < new Date() : false;
 
   return (
     <ProtectedRoute>
-      <div className="min-h-screen bg-gray-50 pt-16">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="flex justify-between items-center mb-6">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">Notices</h1>
-              <p className="text-gray-600 mt-1">
-                {isAdmin ? 'Post and manage hostel announcements' : 'Stay updated with hostel announcements'}
-              </p>
+      <div className="min-h-screen pb-12">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8">
+          <div className="flex justify-between items-center mb-8 animate-fade-in-up">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(249, 115, 22, 0.15))', border: '1px solid rgba(245, 158, 11, 0.3)' }}>
+                <Bell className="h-5 w-5 text-amber-400" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold text-slate-100">Notices</h1>
+                <p className="text-slate-400 text-sm">{isAdmin ? 'Post and manage announcements' : 'Stay updated with announcements'}</p>
+              </div>
             </div>
             {isAdmin && (
-              <button
-                onClick={() => setShowAddModal(true)}
-                className="inline-flex items-center px-4 py-2 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 transition-colors"
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                Post Notice
-              </button>
+              <button onClick={() => setShowAddModal(true)} className="btn-gradient flex items-center gap-2"><Plus className="h-4 w-4" /> Post Notice</button>
             )}
           </div>
 
           {error && (
-            <div className="mb-4 bg-red-50 border-l-4 border-red-400 p-4 flex items-center rounded-r-lg">
-              <AlertCircle className="h-5 w-5 text-red-400 mr-2" />
-              <p className="text-sm text-red-700">{error}</p>
-              <button onClick={() => setError('')} className="ml-auto">
-                <X className="h-4 w-4 text-red-400" />
-              </button>
+            <div className="mb-6 p-4 rounded-xl flex items-center gap-3 animate-slide-down" style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
+              <AlertCircle className="h-5 w-5 text-rose-400 shrink-0" /><p className="text-sm text-rose-300 flex-1">{error}</p>
+              <button onClick={() => setError('')}><X className="h-4 w-4 text-rose-400" /></button>
             </div>
           )}
 
           {loading ? (
-            <div className="flex justify-center py-12">
-              <Loader2 className="h-8 w-8 text-blue-500 animate-spin" />
-            </div>
+            <div className="flex flex-col items-center py-24"><Loader2 className="h-10 w-10 text-indigo-400 animate-spin" /><p className="mt-4 text-slate-400 text-sm">Loading...</p></div>
           ) : notices.length === 0 ? (
-            <div className="text-center py-12 bg-white rounded-xl border-2 border-dashed border-gray-300">
-              <Bell className="mx-auto h-12 w-12 text-gray-400" />
-              <h3 className="mt-2 text-sm font-medium text-gray-900">No notices</h3>
-              <p className="mt-1 text-sm text-gray-500">
-                {isAdmin ? 'Post your first announcement.' : 'No announcements at the moment.'}
-              </p>
-              {isAdmin && (
-                <button
-                  onClick={() => setShowAddModal(true)}
-                  className="mt-4 inline-flex items-center px-4 py-2 text-sm font-medium text-blue-600 bg-blue-50 rounded-lg hover:bg-blue-100"
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Post Notice
-                </button>
-              )}
+            <div className="glass-card text-center py-16 animate-fade-in-up">
+              <Bell className="mx-auto h-14 w-14 text-slate-600 mb-3" />
+              <h3 className="text-lg font-semibold text-slate-300">No notices</h3>
+              <p className="text-slate-500 text-sm mt-1">{isAdmin ? 'Post your first announcement.' : 'No announcements yet.'}</p>
             </div>
           ) : (
             <div className="space-y-4">
-              {notices.map((notice) => {
+              {notices.map((notice, i) => {
                 const expired = isExpired(notice.expires_at);
+                const colors = getPriorityCard(notice.priority);
                 return (
-                  <div
-                    key={notice.id}
-                    className={`bg-white rounded-xl shadow-sm border overflow-hidden transition-all ${
-                      expired ? 'opacity-60' : ''
-                    } ${getPriorityColor(notice.priority)}`}
-                  >
-                    <div className="p-6">
-                      <div className="flex items-start justify-between">
-                        <div className="flex items-start space-x-4">
-                          <div className="flex-shrink-0 mt-1">
-                            {getPriorityIcon(notice.priority)}
+                  <div key={notice.id}
+                    className={`rounded-2xl p-6 transition-all duration-300 hover:scale-[1.005] animate-fade-in-up opacity-0 ${expired ? 'opacity-50' : ''}`}
+                    style={{ animationDelay: `${i * 0.06}s`, animationFillMode: 'forwards', background: colors.bg, border: `1px solid ${colors.border}` }}>
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex items-start gap-4 flex-1 min-w-0">
+                        <div className="shrink-0 mt-0.5">{getPriorityIcon(notice.priority)}</div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-2 flex-wrap">
+                            <h3 className="text-base font-bold text-slate-100">{notice.title}</h3>
+                            <span className={`badge ${getPriorityBadge(notice.priority)}`}>{notice.priority}</span>
+                            {expired && <span className="badge badge-gray">Expired</span>}
                           </div>
-                          <div className="flex-1">
-                            <div className="flex items-center space-x-3 mb-2">
-                              <h3 className="text-lg font-semibold text-gray-900">{notice.title}</h3>
-                              <span className={`px-2 py-0.5 text-xs font-medium rounded-full border ${getPriorityBadgeColor(notice.priority)}`}>
-                                {notice.priority}
-                              </span>
-                              {expired && (
-                                <span className="px-2 py-0.5 text-xs font-medium bg-gray-200 text-gray-600 rounded-full">
-                                  Expired
-                                </span>
-                              )}
-                            </div>
-                            <p className="text-gray-700 whitespace-pre-wrap">{notice.message}</p>
-                            <div className="mt-3 flex items-center space-x-4 text-sm text-gray-500">
-                              <span>
-                                Posted: {new Date(notice.created_at).toLocaleDateString('en-US', {
-                                  month: 'short',
-                                  day: 'numeric',
-                                  year: 'numeric',
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                })}
-                              </span>
-                              {notice.expires_at && (
-                                <span>
-                                  Expires: {new Date(notice.expires_at).toLocaleDateString('en-US', {
-                                    month: 'short',
-                                    day: 'numeric',
-                                    year: 'numeric',
-                                  })}
-                                </span>
-                              )}
-                            </div>
+                          <p className="text-sm text-slate-300 whitespace-pre-wrap">{notice.message}</p>
+                          <div className="mt-3 flex items-center flex-wrap gap-4 text-xs text-slate-500">
+                            <span>Posted: {new Date(notice.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                            {notice.expires_at && <span>Expires: {new Date(notice.expires_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>}
                           </div>
                         </div>
-                        {isAdmin && (
-                          <button
-                            onClick={() => handleDeleteNotice(notice.id)}
-                            className="p-2 text-gray-400 hover:text-red-500 transition-colors"
-                            title="Delete notice"
-                          >
-                            <Trash2 className="h-5 w-5" />
-                          </button>
-                        )}
                       </div>
+                      {isAdmin && (
+                        <button onClick={() => handleDeleteNotice(notice.id)} className="p-2 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-rose-500/10 transition-all shrink-0">
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
@@ -238,76 +132,39 @@ export default function NoticesPage() {
             </div>
           )}
 
+          {/* Add Notice Modal */}
           {showAddModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-              <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full p-6">
-                <div className="flex justify-between items-center mb-4">
-                  <h2 className="text-xl font-bold text-gray-900">Post Notice</h2>
-                  <button onClick={() => setShowAddModal(false)} className="text-gray-400 hover:text-gray-600">
-                    <X className="h-5 w-5" />
-                  </button>
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 modal-overlay animate-backdrop">
+              <div className="glass-card max-w-lg w-[95%] sm:w-full p-6 animate-modal" style={{ background: 'rgba(15, 23, 42, 0.95)' }}>
+                <div className="flex justify-between items-center mb-5">
+                  <h2 className="text-xl font-bold text-slate-100">Post Notice</h2>
+                  <button onClick={() => setShowAddModal(false)} className="text-slate-400 hover:text-white"><X className="h-5 w-5" /></button>
                 </div>
                 <form onSubmit={handleAddNotice} className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
-                    <input
-                      type="text"
-                      required
-                      className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      placeholder="Notice title"
-                      value={newNotice.title}
-                      onChange={(e) => setNewNotice({ ...newNotice, title: e.target.value })}
-                    />
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Title</label>
+                    <input type="text" required className="input-dark" placeholder="Notice title" value={newNotice.title} onChange={(e) => setNewNotice({ ...newNotice, title: e.target.value })} />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Message</label>
-                    <textarea
-                      className="w-full border border-gray-300 rounded-lg px-4 py-2 h-32 focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-                      placeholder="Notice content..."
-                      required
-                      value={newNotice.message}
-                      onChange={(e) => setNewNotice({ ...newNotice, message: e.target.value })}
-                    />
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Message</label>
+                    <textarea className="input-dark h-32 resize-none" placeholder="Notice content..." required value={newNotice.message} onChange={(e) => setNewNotice({ ...newNotice, message: e.target.value })} />
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Priority</label>
-                      <select
-                        className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
-                        value={newNotice.priority}
-                        onChange={(e) => setNewNotice({ ...newNotice, priority: e.target.value as any })}
-                      >
-                        <option value="LOW">Low</option>
-                        <option value="NORMAL">Normal</option>
-                        <option value="HIGH">High</option>
-                        <option value="URGENT">Urgent</option>
+                      <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Priority</label>
+                      <select className="input-dark" value={newNotice.priority} onChange={(e) => setNewNotice({ ...newNotice, priority: e.target.value as any })}>
+                        <option value="LOW">Low</option><option value="NORMAL">Normal</option><option value="HIGH">High</option><option value="URGENT">Urgent</option>
                       </select>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Expires (optional)</label>
-                      <input
-                        type="date"
-                        className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        value={newNotice.expiresAt}
-                        onChange={(e) => setNewNotice({ ...newNotice, expiresAt: e.target.value })}
-                      />
+                      <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Expires (optional)</label>
+                      <input type="date" className="input-dark" value={newNotice.expiresAt} onChange={(e) => setNewNotice({ ...newNotice, expiresAt: e.target.value })} />
                     </div>
                   </div>
-                  <div className="flex justify-end space-x-3 pt-4">
-                    <button
-                      type="button"
-                      onClick={() => setShowAddModal(false)}
-                      className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={submitting}
-                      className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center"
-                    >
-                      {submitting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                      Post Notice
+                  <div className="flex justify-end gap-3 pt-3">
+                    <button type="button" onClick={() => setShowAddModal(false)} className="px-4 py-2.5 text-sm font-medium text-slate-400 rounded-xl hover:bg-white/5">Cancel</button>
+                    <button type="submit" disabled={submitting} className="btn-gradient flex items-center gap-2 disabled:opacity-50">
+                      {submitting && <Loader2 className="h-4 w-4 animate-spin" />} Post Notice
                     </button>
                   </div>
                 </form>
