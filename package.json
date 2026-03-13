@@ -2,14 +2,10 @@
     "name": "hostel-pg-management",
     "version": "1.0.0",
     "private": true,
-    "scripts": {  
-        "build": "cd PROJECT/frontend && npm install && npm run build",
+    "scripts": {
+        "build": "cd PROJECT/frontend && npm run build",
         "dev": "cd PROJECT/frontend && npm run dev",
-       
         "start": "cd PROJECT/frontend && npm run start",
-        "install:frontend": "cd PROJECT/frontend && npm install"
-        
-
-
+        "install:all": "cd PROJECT/frontend && npm install"
     }
 }
