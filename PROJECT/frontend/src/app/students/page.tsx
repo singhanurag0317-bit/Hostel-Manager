@@ -3,10 +3,15 @@
 import React, { useState, useEffect } from 'react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { useAuth } from '@/context/AuthContext';
-import { supabase, Student, Profile, Bed, Room } from '@/lib/supabase';
+import { getStudents, updateStudent, getBeds, updateBed, getRoomsWithBeds, Student, Bed, Room } from '@/lib/store';
 import { Users, Loader2, AlertCircle, X, UserCheck, UserX, Bed as BedIcon, Search } from 'lucide-react';
 
-interface StudentWithDetails extends Student { profile: Profile; bed?: Bed & { room?: Room }; }
+interface StoredUser { id: string; name: string; email: string; role: string; }
+
+interface StudentWithDetails extends Student {
+  name: string; email: string;
+  bedInfo?: { bed_number: string; room_number: string; floor: number; };
+}
 
 export default function StudentsPage() {
   const { profile } = useAuth();
@@ -15,56 +20,64 @@ export default function StudentsPage() {
   const [error, setError] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [showAssignModal, setShowAssignModal] = useState<StudentWithDetails | null>(null);
-  const [availableBeds, setAvailableBeds] = useState<(Bed & { room: Room })[]>([]);
+  const [availableBeds, setAvailableBeds] = useState<(Bed & { room_number: string; floor: number })[]>([]);
   const [selectedBed, setSelectedBed] = useState('');
   const isAdmin = profile?.role === 'ADMIN';
 
-  const fetchStudents = async () => {
+  const getUserMap = (): Record<string, StoredUser> => {
     try {
-      const { data, error } = await supabase.from('students').select(`*, profile:profiles(*), bed:beds(*, room:rooms(*))`).order('created_at', { ascending: false });
-      if (error) throw error; setStudents((data as any) || []);
-    } catch (err: any) { setError(err.message || 'Failed to fetch'); } finally { setLoading(false); }
+      const users: StoredUser[] = JSON.parse(localStorage.getItem('hostel_users') || '[]');
+      return Object.fromEntries(users.map(u => [u.id, u]));
+    } catch { return {}; }
   };
 
-  const fetchAvailableBeds = async () => {
-    const { data } = await supabase.from('beds').select('*, room:rooms(*)').eq('is_occupied', false);
-    setAvailableBeds((data as any) || []);
+  const fetchStudents = () => {
+    const userMap = getUserMap();
+    const rooms = getRoomsWithBeds();
+    const bedRoomMap: Record<string, { bed_number: string; room_number: string; floor: number }> = {};
+    rooms.forEach(r => r.beds.forEach(b => { bedRoomMap[b.id] = { bed_number: b.bed_number, room_number: r.room_number, floor: r.floor }; }));
+
+    const raw = getStudents();
+    const enriched: StudentWithDetails[] = raw.map(s => ({
+      ...s,
+      name: userMap[s.user_id]?.name || 'Unknown',
+      email: userMap[s.user_id]?.email || '',
+      bedInfo: s.bed_id ? bedRoomMap[s.bed_id] : undefined,
+    }));
+    setStudents(enriched.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
+    setLoading(false);
   };
 
-  useEffect(() => { if (isAdmin) { fetchStudents(); fetchAvailableBeds(); } }, [isAdmin]);
-
-  const toggleStudentStatus = async (id: string, active: boolean) => {
-    try { const { error } = await supabase.from('students').update({ active: !active }).eq('id', id); if (error) throw error; fetchStudents(); }
-    catch (err: any) { setError(err.message || 'Failed to update'); }
+  const fetchAvailableBeds = () => {
+    const rooms = getRoomsWithBeds();
+    const free: (Bed & { room_number: string; floor: number })[] = [];
+    rooms.forEach(r => r.beds.filter(b => !b.is_occupied).forEach(b => free.push({ ...b, room_number: r.room_number, floor: r.floor })));
+    setAvailableBeds(free);
   };
 
-  const assignBed = async () => {
+  useEffect(() => { if (isAdmin) { fetchStudents(); fetchAvailableBeds(); } else setLoading(false); }, [isAdmin]);
+
+  const toggleStudentStatus = (id: string, active: boolean) => {
+    updateStudent(id, { active: !active }); fetchStudents();
+  };
+
+  const assignBed = () => {
     if (!showAssignModal || !selectedBed) return;
-    try {
-      if (showAssignModal.bed_id) await supabase.from('beds').update({ is_occupied: false }).eq('id', showAssignModal.bed_id);
-      const [su, bu] = await Promise.all([
-        supabase.from('students').update({ bed_id: selectedBed }).eq('id', showAssignModal.id),
-        supabase.from('beds').update({ is_occupied: true }).eq('id', selectedBed),
-      ]);
-      if (su.error) throw su.error; if (bu.error) throw bu.error;
-      setShowAssignModal(null); setSelectedBed(''); fetchStudents(); fetchAvailableBeds();
-    } catch (err: any) { setError(err.message || 'Failed to assign'); }
+    if (showAssignModal.bed_id) updateBed(showAssignModal.bed_id, { is_occupied: false });
+    updateStudent(showAssignModal.id, { bed_id: selectedBed });
+    updateBed(selectedBed, { is_occupied: true });
+    setShowAssignModal(null); setSelectedBed(''); fetchStudents(); fetchAvailableBeds();
   };
 
-  const unassignBed = async (studentId: string, bedId: string) => {
-    try {
-      const [su, bu] = await Promise.all([
-        supabase.from('students').update({ bed_id: null }).eq('id', studentId),
-        supabase.from('beds').update({ is_occupied: false }).eq('id', bedId),
-      ]);
-      if (su.error) throw su.error; if (bu.error) throw bu.error;
-      fetchStudents(); fetchAvailableBeds();
-    } catch (err: any) { setError(err.message || 'Failed to unassign'); }
+  const unassignBed = (studentId: string, bedId: string) => {
+    updateStudent(studentId, { bed_id: undefined });
+    updateBed(bedId, { is_occupied: false });
+    fetchStudents(); fetchAvailableBeds();
   };
 
   const filteredStudents = students.filter(s =>
-    s.profile?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    s.profile?.email?.toLowerCase().includes(searchTerm.toLowerCase())
+    s.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    s.email?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   if (!isAdmin) {
@@ -120,16 +133,16 @@ export default function StudentsPage() {
                         <td>
                           <div className="flex items-center gap-3">
                             <div className="h-10 w-10 rounded-xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(139, 92, 246, 0.15))', border: '1px solid rgba(99, 102, 241, 0.2)' }}>
-                              <span className="text-indigo-300 font-bold text-sm">{student.profile?.name?.charAt(0).toUpperCase()}</span>
+                              <span className="text-indigo-300 font-bold text-sm">{student.name?.charAt(0).toUpperCase()}</span>
                             </div>
-                            <div><div className="font-medium text-slate-100">{student.profile?.name}</div><div className="text-xs text-slate-500">{student.profile?.email}</div></div>
+                            <div><div className="font-medium text-slate-100">{student.name}</div><div className="text-xs text-slate-500">{student.email}</div></div>
                           </div>
                         </td>
                         <td>
-                          {student.bed ? (
+                          {student.bedInfo ? (
                             <div className="flex items-center gap-2 text-sm">
                               <BedIcon className="h-4 w-4 text-slate-500" />
-                              <span className="text-slate-300">Room {student.bed.room?.room_number}, Bed {student.bed.bed_number}</span>
+                              <span className="text-slate-300">Room {student.bedInfo.room_number}, Bed {student.bedInfo.bed_number}</span>
                             </div>
                           ) : <span className="text-slate-500 italic text-sm">Not assigned</span>}
                         </td>
@@ -158,7 +171,6 @@ export default function StudentsPage() {
             </div>
           )}
 
-          {/* Assign Bed Modal */}
           {showAssignModal && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 modal-overlay animate-backdrop">
               <div className="glass-card max-w-md w-[95%] sm:w-full p-6 animate-modal" style={{ background: 'rgba(15, 23, 42, 0.95)' }}>
@@ -166,13 +178,13 @@ export default function StudentsPage() {
                   <h2 className="text-xl font-bold text-slate-100">Assign Bed</h2>
                   <button onClick={() => setShowAssignModal(null)} className="text-slate-400 hover:text-white"><X className="h-5 w-5" /></button>
                 </div>
-                <p className="text-sm text-slate-400 mb-4">Assign a bed to <strong className="text-slate-200">{showAssignModal.profile?.name}</strong></p>
+                <p className="text-sm text-slate-400 mb-4">Assign a bed to <strong className="text-slate-200">{showAssignModal.name}</strong></p>
                 <div className="space-y-4">
                   <div>
                     <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Select Bed</label>
                     <select className="input-dark" value={selectedBed} onChange={(e) => setSelectedBed(e.target.value)}>
                       <option value="">Select a bed...</option>
-                      {availableBeds.map((bed) => <option key={bed.id} value={bed.id}>Room {bed.room?.room_number} - Bed {bed.bed_number} (Floor {bed.room?.floor})</option>)}
+                      {availableBeds.map((bed) => <option key={bed.id} value={bed.id}>Room {bed.room_number} - Bed {bed.bed_number} (Floor {bed.floor})</option>)}
                     </select>
                   </div>
                   <div className="flex justify-end gap-3 pt-3">

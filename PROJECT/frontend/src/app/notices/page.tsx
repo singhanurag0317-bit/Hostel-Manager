@@ -3,11 +3,11 @@
 import React, { useState, useEffect } from 'react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { useAuth } from '@/context/AuthContext';
-import { supabase, Notice } from '@/lib/supabase';
+import { getNotices, addNotice, deleteNotice, Notice } from '@/lib/store';
 import { Bell, Plus, Loader2, AlertCircle, X, Trash2, AlertTriangle, Info, Clock } from 'lucide-react';
 
 export default function NoticesPage() {
-  const { profile, user } = useAuth();
+  const { profile } = useAuth();
   const [notices, setNotices] = useState<Notice[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -16,32 +16,21 @@ export default function NoticesPage() {
   const [newNotice, setNewNotice] = useState({ title: '', message: '', priority: 'NORMAL' as const, expiresAt: '' });
   const isAdmin = profile?.role === 'ADMIN';
 
-  const fetchNotices = async () => {
-    try {
-      const { data, error } = await supabase.from('notices').select('*').order('created_at', { ascending: false });
-      if (error) throw error; setNotices(data || []);
-    } catch { setError('Failed to fetch notices'); } finally { setLoading(false); }
-  };
+  const fetchNotices = () => { setNotices(getNotices()); setLoading(false); };
+  useEffect(() => { fetchNotices(); }, []);
 
-  useEffect(() => {
-    fetchNotices();
-    const ch = supabase.channel('notices-rt').on('postgres_changes', { event: '*', schema: 'public', table: 'notices' }, () => fetchNotices()).subscribe();
-    return () => { supabase.removeChannel(ch); };
-  }, []);
-
-  const handleAddNotice = async (e: React.FormEvent) => {
+  const handleAddNotice = (e: React.FormEvent) => {
     e.preventDefault(); setSubmitting(true);
     try {
-      const { error } = await supabase.from('notices').insert({ title: newNotice.title, message: newNotice.message, priority: newNotice.priority, created_by: user?.id, expires_at: newNotice.expiresAt || null });
-      if (error) throw error;
-      setShowAddModal(false); setNewNotice({ title: '', message: '', priority: 'NORMAL', expiresAt: '' });
-    } catch (err: any) { setError(err.message || 'Failed to post'); } finally { setSubmitting(false); }
+      addNotice({ title: newNotice.title, message: newNotice.message, priority: newNotice.priority, created_by: profile?.id, expires_at: newNotice.expiresAt || undefined });
+      setShowAddModal(false); setNewNotice({ title: '', message: '', priority: 'NORMAL', expiresAt: '' }); fetchNotices();
+    } catch (err: any) { setError(err.message || 'Failed to post'); }
+    finally { setSubmitting(false); }
   };
 
-  const handleDeleteNotice = async (id: string) => {
+  const handleDeleteNotice = (id: string) => {
     if (!confirm('Delete this notice?')) return;
-    try { const { error } = await supabase.from('notices').delete().eq('id', id); if (error) throw error; }
-    catch (err: any) { setError(err.message || 'Failed to delete'); }
+    deleteNotice(id); fetchNotices();
   };
 
   const getPriorityIcon = (p: string) => {
@@ -50,14 +39,12 @@ export default function NoticesPage() {
     if (p === 'NORMAL') return <Info className="h-5 w-5 text-blue-400" />;
     return <Clock className="h-5 w-5 text-slate-400" />;
   };
-
   const getPriorityCard = (p: string) => {
     if (p === 'URGENT') return { bg: 'rgba(239, 68, 68, 0.06)', border: 'rgba(239, 68, 68, 0.15)' };
     if (p === 'HIGH') return { bg: 'rgba(245, 158, 11, 0.06)', border: 'rgba(245, 158, 11, 0.15)' };
     if (p === 'NORMAL') return { bg: 'rgba(59, 130, 246, 0.06)', border: 'rgba(59, 130, 246, 0.12)' };
     return { bg: 'rgba(148, 163, 184, 0.05)', border: 'rgba(148, 163, 184, 0.1)' };
   };
-
   const getPriorityBadge = (p: string) => p === 'URGENT' ? 'badge-red' : p === 'HIGH' ? 'badge-orange' : p === 'NORMAL' ? 'badge-blue' : 'badge-gray';
   const isExpired = (e?: string) => e ? new Date(e) < new Date() : false;
 
@@ -132,7 +119,6 @@ export default function NoticesPage() {
             </div>
           )}
 
-          {/* Add Notice Modal */}
           {showAddModal && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 modal-overlay animate-backdrop">
               <div className="glass-card max-w-lg w-[95%] sm:w-full p-6 animate-modal" style={{ background: 'rgba(15, 23, 42, 0.95)' }}>
